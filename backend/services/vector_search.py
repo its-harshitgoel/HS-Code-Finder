@@ -15,9 +15,9 @@ try:
 except ImportError:
     faiss = None
 
-from backend.models.schemas import Candidate, HSEntry
-from backend.services.embedding import EmbeddingService
-from backend.utils.logger import get_logger
+from models.schemas import Candidate, HSEntry
+from services.embedding import EmbeddingService
+from utils.logger import get_logger
 
 logger = get_logger("vector_search")
 

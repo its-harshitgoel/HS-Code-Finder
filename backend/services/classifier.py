@@ -19,18 +19,18 @@ Behavioral Rules (from gemini.md):
 import re
 import uuid
 
-from backend.models.schemas import (
+from models.schemas import (
     Candidate,
     ChatMessage,
     ClassifyResponse,
     FinalResult,
     SessionState,
 )
-from backend.services.embedding import EmbeddingService
-from backend.services.hs_knowledge import HSKnowledgeBase
-from backend.services.llm_service import GeminiService
-from backend.services.vector_search import VectorSearchService
-from backend.utils.logger import get_logger
+from services.embedding import EmbeddingService
+from services.hs_knowledge import HSKnowledgeBase
+from services.llm_service import GeminiService
+from services.vector_search import VectorSearchService
+from utils.logger import get_logger
 
 logger = get_logger("classifier")
 

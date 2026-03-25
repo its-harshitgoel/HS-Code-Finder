@@ -24,13 +24,13 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from backend.api.routes import init_router, router
-from backend.services.classifier import ClassificationEngine
-from backend.services.embedding import EmbeddingService
-from backend.services.hs_knowledge import HSKnowledgeBase
-from backend.services.llm_service import GeminiService
-from backend.services.vector_search import VectorSearchService
-from backend.utils.logger import get_logger
+from api.routes import init_router, router
+from services.classifier import ClassificationEngine
+from services.embedding import EmbeddingService
+from services.hs_knowledge import HSKnowledgeBase
+from services.llm_service import GeminiService
+from services.vector_search import VectorSearchService
+from utils.logger import get_logger
 
 # Load .env file from project root
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")

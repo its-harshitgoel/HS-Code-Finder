@@ -9,9 +9,9 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException, Request
 
-from backend.models.schemas import ClassifyRequest, ClassifyResponse, HealthResponse
-from backend.utils.logger import get_logger
-from backend.utils.rate_limit import is_rate_limited
+from models.schemas import ClassifyRequest, ClassifyResponse, HealthResponse
+from utils.logger import get_logger
+from utils.rate_limit import is_rate_limited
 
 logger = get_logger("api")
 

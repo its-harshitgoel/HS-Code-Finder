@@ -10,8 +10,8 @@ Model:   all-MiniLM-L6-v2 (384 dimensions, fast, runs locally).
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from backend.utils.logger import get_logger
-from backend.utils.text_processing import prepare_for_embedding
+from utils.logger import get_logger
+from utils.text_processing import prepare_for_embedding
 
 logger = get_logger("embedding")
 

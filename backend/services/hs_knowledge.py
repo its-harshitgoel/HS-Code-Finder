@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from backend.models.schemas import HSEntry
-from backend.utils.logger import get_logger
+from models.schemas import HSEntry
+from utils.logger import get_logger
 
 logger = get_logger("hs_knowledge")
 
