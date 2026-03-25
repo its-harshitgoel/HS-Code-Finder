@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="HSCodeFinder — Intelligent HS Code Classification Assistant. Find the correct Harmonized System code for your products with AI-powered conversational guidance.">
+    <title>HSCodeFinder — HS Code Classification Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="app" class="app-container">
+        <!-- Background Gradient Orbs -->
+        <div class="bg-orb bg-orb-1"></div>
+        <div class="bg-orb bg-orb-2"></div>
+        <div class="bg-orb bg-orb-3"></div>
+
+        <!-- Header -->
+        <header id="app-header" class="header">
+            <div class="header-content">
+                <div class="logo-group">
+                    <div class="logo-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="logo-title">HSCodeFinder</h1>
+                        <p class="logo-subtitle">AI Classification Assistant</p>
+                    </div>
+                </div>
+                <button id="new-chat-btn" class="btn-new-chat" title="Start new conversation">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                    New Chat
+                </button>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <main id="chat-area" class="chat-area">
+            <!-- Welcome Message (shown initially) -->
+            <div id="welcome-screen" class="welcome-screen">
+                <div class="welcome-icon">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                    </svg>
+                </div>
+                <h2 class="welcome-title">What product would you like to classify?</h2>
+                <p class="welcome-subtitle">Describe your product in plain language and I'll help you find the correct HS code.</p>
+                <div class="welcome-examples">
+                    <button class="example-chip" data-query="cotton t-shirt for men">Cotton t-shirt</button>
+                    <button class="example-chip" data-query="frozen shrimp seafood">Frozen shrimp</button>
+                    <button class="example-chip" data-query="wooden kitchen furniture table">Wooden table</button>
+                    <button class="example-chip" data-query="laptop computer notebook">Laptop computer</button>
+                    <button class="example-chip" data-query="olive oil for cooking">Olive oil</button>
+                    <button class="example-chip" data-query="rubber tires for cars">Car tires</button>
+                </div>
+            </div>
+
+            <!-- Messages Container -->
+            <div id="messages-container" class="messages-container"></div>
+
+            <!-- Typing Indicator -->
+            <div id="typing-indicator" class="typing-indicator hidden">
+                <div class="typing-avatar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    </svg>
+                </div>
+                <div class="typing-dots">
+                    <span></span><span></span><span></span>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer id="input-area" class="input-area">
+            <div class="input-wrapper">
+                <textarea
+                    id="message-input"
+                    class="message-input"
+                    placeholder="Describe your product..."
+                    rows="1"
+                    autofocus
+                ></textarea>
+                <button id="send-btn" class="btn-send" title="Send message" disabled>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
+            </div>
+            <p class="input-hint">Press Enter to send, Shift+Enter for new line</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
