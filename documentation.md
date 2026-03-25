@@ -228,6 +228,12 @@ Recommended security/runtime:
 - `RATE_LIMIT_WINDOW_SECONDS=60`
 - `RATE_LIMIT_MAX_REQUESTS=30`
 
+Frontend serving (for deployment):
+
+- `SERVE_FRONTEND=true` (default: `true`)
+  - Set to `true` for local development (FastAPI serves both frontend and API)
+  - Set to `false` for production (Render backend API only, with Vercel frontend served separately)
+
 ---
 
 ## 11) Error Handling Strategy

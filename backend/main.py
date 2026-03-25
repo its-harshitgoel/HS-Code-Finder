@@ -85,6 +85,9 @@ def _parse_csv_env(name: str, default: str) -> list[str]:
 ALLOWED_ORIGINS = _parse_csv_env("ALLOWED_ORIGINS", "http://localhost:8001,http://127.0.0.1:8001")
 ALLOWED_HOSTS = _parse_csv_env("ALLOWED_HOSTS", "localhost,127.0.0.1")
 
+# Determine if we should serve frontend locally (development mode)
+SERVE_FRONTEND = os.environ.get("SERVE_FRONTEND", "true").lower() == "true"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -163,15 +166,20 @@ async def add_security_headers(request, call_next):
 # Register API routes
 app.include_router(router)
 
-# Mount frontend static files
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+# Mount frontend files locally (development mode)
+if SERVE_FRONTEND and FRONTEND_DIR.exists():
+    # Serve static files (CSS, JS) from frontend directory at root
+    app.mount("", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
-
-@app.get("/")
-async def serve_frontend():
-    """Serve the frontend index.html."""
-    index_path = FRONTEND_DIR / "index.html"
-    if index_path.exists():
-        return FileResponse(str(index_path))
-    return {"message": "HSCodeFinder API is running. Frontend not found."}
+    @app.get("/", include_in_schema=False)
+    async def serve_frontend_root():
+        """Serve index.html from frontend directory."""
+        index_path = FRONTEND_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path))
+        return {"message": "HSCodeFinder API is running."}
+else:
+    @app.get("/", include_in_schema=False)
+    async def api_root():
+        """Return API status when frontend is not served."""
+        return {"message": "HSCodeFinder API is running.", "status": "ok"}
