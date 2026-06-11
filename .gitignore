@@ -26,8 +26,8 @@ env/
 .DS_Store
 Thumbs.db
 
-# ML model cache
-models/
+# ML model cache (top-level only, not backend/models/)
+/models/
 
 # Generated data files
 *.faiss
