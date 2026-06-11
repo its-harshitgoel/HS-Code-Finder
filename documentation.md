@@ -2,7 +2,7 @@
 
 ## 1) Product Overview
 
-HS Code Finder is an AI-assisted classification tool that helps users identify the most appropriate **6-digit Harmonized System (HS) code** for a product.
+HS Code Finder is an AI-assisted classification tool that helps users identify the correct **6-digit Harmonized System (HS) code** for a product.
 
 ### Core value
 
@@ -16,7 +16,7 @@ HS Code Finder is an AI-assisted classification tool that helps users identify t
 ## 2) End-to-End User Flow
 
 1. User opens the web app at `/`.
-2. User types a product description (example: “frozen shrimp seafood”).
+2. User types a product description (example: "frozen shrimp seafood").
 3. Frontend sends request to `POST /api/classify`.
 4. Backend validates and sanitizes input.
 5. Classification engine either:
@@ -24,15 +24,12 @@ HS Code Finder is an AI-assisted classification tool that helps users identify t
    - continues existing session.
 6. System creates embeddings for user text.
 7. FAISS vector search finds top HS candidates.
-8. Gemini receives candidate context + conversation context.
-9. Gemini returns either:
+8. OpenAI receives candidate context + conversation context.
+9. OpenAI returns either:
    - a short clarifying question, or
    - a final classification in structured format.
 10. Backend parses response and returns JSON to frontend.
-11. Frontend renders either:
-
-- follow-up question, or
-- final result card with hierarchy path.
+11. Frontend renders either a follow-up question or a final result card with hierarchy path.
 
 ---
 
@@ -43,8 +40,8 @@ On application startup (`backend/main.py` lifespan):
 1. Load `.env` variables.
 2. Load HS dataset (`data/hs_codes.csv`) into memory.
 3. Load embedding model (`all-MiniLM-L6-v2`).
-4. Build FAISS index from headings + subheadings.
-5. Initialize Gemini client.
+4. Build FAISS index from 6-digit subheadings only, with hierarchy-enriched text (chapter → heading → subheading descriptions concatenated for richer semantic context).
+5. Initialize OpenAI client.
 6. Initialize classification engine and inject dependencies into API router.
 7. Serve API + static frontend.
 
@@ -62,12 +59,9 @@ Request body:
 Flow:
 
 1. Endpoint checks service readiness.
-2. Rate limiter checks client request volume.
-3. Request model sanitizes and validates input.
-4. Classification engine processes query.
-5. Returns `ClassifyResponse` with type:
-   - `question` or
-   - `result`
+2. Request model validates input.
+3. Classification engine processes query.
+4. Returns `ClassifyResponse` with type `question` or `result`.
 
 ### `GET /api/health`
 
@@ -88,22 +82,25 @@ File: `backend/services/classifier.py`
 - Create `session_id`.
 - Save initial user message.
 - Embed query and search top-k candidates.
-- Send candidates to Gemini.
-- Parse Gemini output:
+- Send candidates to OpenAI.
+- Parse OpenAI output:
   - if `RESULT:`, build final result
   - else return clarifying question
 
 ### Existing session
 
 - Append user follow-up answer.
-- Re-run semantic search using combined query (`original + answer`).
-- Send updated context to Gemini.
+- Reuse original candidate set (re-searching with follow-up answers corrupts candidates).
+- Send updated conversation history to OpenAI.
 - Parse and return question/result.
+- After MAX_QUESTIONS answers are processed, force the top candidate as the result.
 
 ### Safeguards
 
 - Empty message protection.
-- Max question cap (`MAX_QUESTIONS`) to avoid infinite loops.
+- Max question cap (`MAX_QUESTIONS=5`) — the user's final answer is always processed before forcing.
+- REFINE signal: if the LLM detects wrong candidates, automatic retry with better search terms (one retry max).
+- Session eviction: completed sessions are deleted immediately; active sessions use LRU eviction at 1000.
 - Result fallback if search/LLM flow degrades.
 
 ---
@@ -124,13 +121,11 @@ File: `backend/services/classifier.py`
 
 ### LLM Service (`backend/services/llm_service.py`)
 
-- Uses Google Gemini via `google-genai` SDK.
-- Has system prompt with strict classification behavior.
-- Retry/backoff for transient API failures.
-- Prompt injection hardening:
-  - sanitize untrusted user text,
-  - treat user text as data, not instructions,
-  - bounded output handling.
+- Uses OpenAI GPT-4o Mini (configurable via `OPENAI_MODEL` env var) via the `openai` SDK.
+- System prompt enforces 5-step classification: relevance check → normalization → product profile → smart questioning → confidence gating.
+- `expand_query()`: translates consumer language to HS trade terminology for retrieval (results cached in memory).
+- 30-second timeout on all OpenAI requests.
+- Single API call per turn; returns a fallback message on error.
 
 ---
 
@@ -144,9 +139,7 @@ File: `backend/services/classifier.py`
 ### Knowledge Base (`backend/services/hs_knowledge.py`)
 
 - Loads CSV and validates schema.
-- Stores indexed structures:
-  - by code
-  - by parent
+- Stores indexed structures by code and by parent.
 - Supports hierarchy traversal (chapter → heading → subheading).
 
 ---
@@ -181,37 +174,16 @@ UI result card includes:
 
 ### Secrets
 
-- API key is loaded from environment (`GEMINI_API_KEY`).
+- API key is loaded from environment (`OPENAI_API_KEY`).
 - `.env` is ignored in VCS.
 - `.env.example` is template-only.
 
 ### Request safety
 
-- Pydantic schema validation.
-- Message sanitization (control-char cleanup, whitespace normalization, length constraints).
-- UUID validation for session id.
-
-### API abuse protection
-
-- In-memory per-IP rate limiting on classify endpoint.
-- Configurable via env:
-  - `RATE_LIMIT_WINDOW_SECONDS`
-  - `RATE_LIMIT_MAX_REQUESTS`
-
-### Web/API hardening
-
-- CORS allowlist (`ALLOWED_ORIGINS`).
-- Trusted host allowlist (`ALLOWED_HOSTS`).
-- Security headers:
-  - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: DENY`
-  - `Referrer-Policy: no-referrer`
-  - `Permissions-Policy` restrictions
-
-### Logging safety
-
-- Avoid logging raw user product descriptions.
-- Log metadata (length/session) instead of content.
+- Pydantic schema validation (control-char cleanup, whitespace normalization, 1000-char cap).
+- Rate limiting: 20 requests/minute per IP on `/api/classify` (via slowapi).
+- Security headers on all responses: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `X-XSS-Protection`.
+- Prompt injection hardening: user text is wrapped in XML tags (`<product>`, `<answer>`) and treated as data, not instructions.
 
 ---
 
@@ -219,20 +191,14 @@ UI result card includes:
 
 Required:
 
-- `GEMINI_API_KEY`
+- `OPENAI_API_KEY`
 
-Recommended security/runtime:
+Optional:
 
-- `ALLOWED_ORIGINS=http://localhost:8001,http://127.0.0.1:8001`
-- `ALLOWED_HOSTS=localhost,127.0.0.1`
-- `RATE_LIMIT_WINDOW_SECONDS=60`
-- `RATE_LIMIT_MAX_REQUESTS=30`
-
-Frontend serving (for deployment):
-
+- `OPENAI_MODEL` (default: `gpt-4o-mini`) — override the OpenAI model used for classification.
 - `SERVE_FRONTEND=true` (default: `true`)
-  - Set to `true` for local development (FastAPI serves both frontend and API)
-  - Set to `false` for production (Render backend API only, with Vercel frontend served separately)
+  - `true` — FastAPI serves both frontend and API (local dev)
+  - `false` — backend API only (Render backend + Vercel frontend)
 
 ---
 
@@ -240,35 +206,12 @@ Frontend serving (for deployment):
 
 - User-facing API errors are generic and safe.
 - Internal details are logged server-side.
-- LLM failures degrade gracefully with fallback prompt.
+- LLM failures degrade gracefully with a fallback prompt asking for more detail.
 - Startup failures surface early (dataset/model/index initialization).
 
 ---
 
 ## 12) Tools Included in Repository
 
-- `tools/load_dataset.py`
-  - downloads and validates HS dataset.
-- `tools/build_index.py`
-  - builds index and runs test queries for quality checks.
-
----
-
-## 13) Production Readiness Checklist
-
-- [x] No hardcoded API keys in source
-- [x] `.env` excluded from git
-- [x] Input validation + sanitization
-- [x] Rate limiting
-- [x] CORS/host restrictions configurable
-- [x] Sensitive logging reduced
-- [x] Graceful LLM failure fallback
-
----
-
-## 14) Suggested Next Improvements (Optional)
-
-- Move rate limit storage to Redis for multi-instance deployment.
-- Add request tracing IDs for observability.
-- Add CI dependency vulnerability scans (`pip-audit`).
-- Add automated API tests for security behavior (429, malformed payloads, host/origin checks).
+- `tools/load_dataset.py` — downloads and validates the HS dataset.
+- `tools/build_index.py` — builds index and runs test queries for quality checks.

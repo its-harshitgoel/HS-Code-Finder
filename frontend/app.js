@@ -34,17 +34,25 @@
       message: message.trim(),
     };
 
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s
 
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      return await response.json();
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return await response.json();
   }
 
   // ---------- Message Rendering ----------
@@ -74,34 +82,73 @@
 
     messageEl.innerHTML = `
             <div class="message-avatar">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
                 </svg>
             </div>
             <div class="message-bubble">${bubbleContent}</div>
         `;
 
     messagesContainer.appendChild(messageEl);
+
+    if (response.options && response.options.length >= 2) {
+      renderOptionButtons(response.options);
+    }
+
     scrollToBottom();
+  }
+
+  function renderOptionButtons(options) {
+    removeOptionButtons();
+
+    const container = document.createElement("div");
+    container.className = "option-buttons";
+    container.id = "option-buttons";
+
+    options.forEach((option) => {
+      const btn = document.createElement("button");
+      btn.className = "option-btn";
+      btn.textContent = option;
+      btn.addEventListener("click", () => {
+        if (isLoading) return;
+        removeOptionButtons();
+        messageInput.value = option;
+        autoResize();
+        handleSend();
+      });
+      container.appendChild(btn);
+    });
+
+    messagesContainer.appendChild(container);
+  }
+
+  function removeOptionButtons() {
+    const existing = document.getElementById("option-buttons");
+    if (existing) existing.remove();
   }
 
   function renderResultCard(response) {
     const result = response.final_result;
+    const expl = result.explanation || "";
 
-    // Parse hierarchy from explanation
+    // Extract and remove the classification path line so it can be styled separately.
     let hierarchyHtml = "";
-    const pathMatch = result.explanation.match(
-      /Classification path:\*\*\s*(.+)/,
-    );
+    let bodyText = expl;
+    const pathMatch = expl.match(/\*\*Classification path:\*\*\s*(.+)/);
     if (pathMatch) {
       const steps = pathMatch[1].split(" → ");
       hierarchyHtml = steps
-        .map(
-          (step) =>
-            `<span class="hierarchy-step">${escapeHtml(step.trim())}</span>`,
-        )
+        .map((step) => `<span class="hierarchy-step">${escapeHtml(step.trim())}</span>`)
         .join('<span class="hierarchy-arrow">→</span>');
+      bodyText = bodyText.replace(/\*\*Classification path:\*\*.*$/s, "").trim();
     }
+
+    const explanationHtml = bodyText
+      ? `<div class="result-explanation">${formatMessage(bodyText)}</div>`
+      : "";
 
     return `
             <div class="result-card">
@@ -110,6 +157,7 @@
                 </div>
                 <div class="hs-code">${escapeHtml(result.hs_code)}</div>
                 <div class="hs-description">${escapeHtml(result.description)}</div>
+                ${explanationHtml}
                 ${hierarchyHtml ? `<div class="hierarchy-path">${hierarchyHtml}</div>` : ""}
             </div>
         `;
@@ -205,6 +253,9 @@
     // Hide welcome screen on first message
     hideWelcomeScreen();
 
+    // Clear any pending option buttons
+    removeOptionButtons();
+
     // Render user message
     renderUserMessage(message);
 
@@ -228,10 +279,12 @@
       }
     } catch (error) {
       console.error("API Error:", error);
+      const isTimeout = error.name === "AbortError";
       renderAssistantMessage({
         type: "question",
-        message:
-          "Sorry, something went wrong. Please try again or rephrase your description.",
+        message: isTimeout
+          ? "The request timed out. The server may be busy — please try again."
+          : "Sorry, something went wrong. Please try again or rephrase your description.",
         candidates: [],
         final_result: null,
       });
@@ -261,17 +314,6 @@
 
   // New chat button
   newChatBtn.addEventListener("click", clearChat);
-
-  // Example chips
-  document.querySelectorAll(".example-chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const query = chip.getAttribute("data-query");
-      messageInput.value = query;
-      autoResize();
-      sendBtn.disabled = false;
-      handleSend();
-    });
-  });
 
   // Focus input on load
   messageInput.focus();

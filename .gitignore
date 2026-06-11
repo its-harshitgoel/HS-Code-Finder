@@ -1,81 +1,47 @@
-# ============================================================
-# HSCodeFinder — .gitignore
-# ============================================================
-
-# ---------- Secrets & Environment ----------
+# Secrets
 .env
-.env.local
 .env.*
-.env.*.local
 !.env.example
-*.key
-*.pem
 
-# ---------- Python ----------
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-*.egg
 *.egg-info/
 dist/
 build/
-eggs/
-*.whl
-pip-log.txt
-pip-delete-this-directory.txt
 
-# ---------- Virtual Environments ----------
+# Virtual environments
 .venv/
 venv/
 env/
-ENV/
 
-# ---------- IDE / Editor ----------
+# IDE
 .vscode/
 .idea/
 *.swp
-*.swo
 *~
-.project
-.settings/
-*.sublime-project
-*.sublime-workspace
 
-# ---------- OS Files ----------
+# OS
 .DS_Store
 Thumbs.db
-desktop.ini
-*.tmp
 
-# ---------- ML / Model Cache ----------
-# Sentence-transformers model cache (downloaded on first run)
-# Users should let the app download these automatically
+# ML model cache
 models/
+
+# Generated data files
 *.faiss
 *.index
-
-# ---------- Data (large files) ----------
-# The CSV dataset ships with the repo, but generated indexes don't
 *.npy
-*.npz
 *.pkl
-*.pickle
+*.fingerprint
 
-# ---------- Logs ----------
+# Build artifacts / cache
+data/cache/
+data/hs_codes.csv
+
+# Logs & caches
 *.log
 logs/
-
-# ---------- Local databases / caches ----------
-*.db
-*.sqlite3
 .pytest_cache/
 .mypy_cache/
-
-# ---------- Project Planning (internal) ----------
-# These are local development notes, not needed in the repo
-gemini.md
-findings.md
-progress.md
-task_plan.md
-harmonized-system.csv

@@ -1,179 +1,136 @@
-"""
-HSCodeFinder — FastAPI Application Entry Point.
-
-Purpose: Initializes all services on startup (dataset, embeddings, FAISS index),
-         mounts the API router, and serves the frontend static files.
-
-Startup sequence:
-    1. Load HS dataset from CSV
-    2. Load embedding model
-    3. Build FAISS vector index
-    4. Initialize classification engine
-    5. Serve frontend and API
-"""
-
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.routes import init_router, router
+from api.routes import init_router, limiter, router
 from services.classifier import ClassificationEngine
 from services.embedding import EmbeddingService
 from services.hs_knowledge import HSKnowledgeBase
-from services.llm_service import GeminiService
+from services.llm_service import OpenAIService
 from services.vector_search import VectorSearchService
 from utils.logger import get_logger
 
-# Load .env file from project root
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 logger = get_logger("main")
 
-# Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+CACHE_DIR = DATA_DIR / "cache"
 FRONTEND_DIR = BASE_DIR / "frontend"
 CSV_PATH = DATA_DIR / "hs_codes.csv"
 
-# Global service instances
+# Bump when embedding logic or indexed text changes — triggers automatic cache rebuild on startup.
+# v6: removed stop-word filtering and parenthesis stripping from prepare_for_embedding
+CACHE_VERSION = "v6-clean-embedding"
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip().strip('"').strip("'")
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not set. LLM classification will not work.")
+
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+SERVE_FRONTEND = os.environ.get("SERVE_FRONTEND", "true").lower() == "true"
+
 knowledge_base = HSKnowledgeBase()
 embedding_service = EmbeddingService()
 vector_search = VectorSearchService()
-gemini_service: GeminiService | None = None
+openai_service: OpenAIService | None = None
 classifier: ClassificationEngine | None = None
 
-def _load_gemini_api_key() -> str:
-    """Load and sanitize GEMINI_API_KEY from environment."""
-    raw = os.getenv("GEMINI_API_KEY")
-    if raw is None:
-        return ""
 
-    value = raw.strip().strip('"').strip("'")
-
-    # Prevent accidental placeholder values from being treated as real secrets.
-    placeholders = {
-        "your_gemini_api_key_here",
-        "your_key_here",
-        "changeme",
-        "replace_me",
-    }
-    if not value or value.lower() in placeholders:
-        return ""
-
-    return value
-
-
-# Gemini API key — loaded from .env, never hardcoded
-GEMINI_API_KEY = _load_gemini_api_key()
-if not GEMINI_API_KEY:
-    logger.warning("GEMINI_API_KEY missing or placeholder. LLM reasoning will be limited until it is set.")
-
-
-def _parse_csv_env(name: str, default: str) -> list[str]:
-    raw = os.environ.get(name, default)
-    return [item.strip() for item in raw.split(",") if item.strip()]
-
-
-ALLOWED_ORIGINS = _parse_csv_env("ALLOWED_ORIGINS", "http://localhost:8001,http://127.0.0.1:8001")
-ALLOWED_HOSTS = _parse_csv_env("ALLOWED_HOSTS", "localhost,127.0.0.1")
-
-# Determine if we should serve frontend locally (development mode)
-SERVE_FRONTEND = os.environ.get("SERVE_FRONTEND", "true").lower() == "true"
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize all services on startup."""
-    global classifier, gemini_service
+    global classifier, openai_service
 
-    logger.info("=" * 60)
     logger.info("HSCodeFinder — Starting up")
-    logger.info("=" * 60)
 
-    # Step 1: Load HS dataset
-    logger.info("Step 1/5: Loading HS dataset...")
     knowledge_base.load(CSV_PATH)
-
-    # Step 2: Load embedding model
-    logger.info("Step 2/5: Loading embedding model...")
     embedding_service.load_model()
 
-    # Step 3: Build FAISS index (index subheadings + headings for broader coverage)
-    logger.info("Step 3/5: Building vector index...")
-    entries_to_index = knowledge_base.get_subheadings() + knowledge_base.get_headings()
-    vector_search.build_index(entries_to_index, embedding_service)
+    cache_version_file = CACHE_DIR / "cache_version.txt"
+    cached_version = cache_version_file.read_text().strip() if cache_version_file.exists() else ""
+    cache_valid = cached_version == CACHE_VERSION and vector_search.load_from_disk(CACHE_DIR)
 
-    # Step 4: Initialize Gemini LLM
-    logger.info("Step 4/5: Initializing Gemini LLM...")
-    gemini_service = GeminiService(api_key=GEMINI_API_KEY)
-    gemini_service.initialize()
+    if not cache_valid:
+        reason = "version mismatch" if cached_version else "no cache found"
+        logger.info("Building fresh FAISS index (%s, target=%s)...", reason, CACHE_VERSION)
+        entries_to_index = knowledge_base.get_subheadings()
 
-    # Step 5: Initialize classification engine
-    logger.info("Step 5/5: Initializing classification engine...")
+        hierarchy: dict[str, list[str]] = {}
+        for entry in entries_to_index:
+            path = knowledge_base.get_hierarchy_path(entry.hs_code)
+            descs = list(dict.fromkeys(e.description for e in path))
+            if len(descs) > 1:
+                hierarchy[entry.hs_code] = descs
+
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        vector_search.build_index(entries_to_index, embedding_service, hierarchy=hierarchy)
+        vector_search.save_to_disk(CACHE_DIR)
+        cache_version_file.write_text(CACHE_VERSION)
+
+    openai_service = OpenAIService(api_key=OPENAI_API_KEY, model_name=OPENAI_MODEL)
+    openai_service.initialize()
+
     classifier = ClassificationEngine(
-        knowledge_base, embedding_service, vector_search, gemini_service
+        knowledge_base, embedding_service, vector_search, openai_service
     )
     init_router(classifier, knowledge_base, vector_search)
 
-    logger.info("=" * 60)
-    logger.info("HSCodeFinder — Ready! Serving at http://localhost:8001")
-    logger.info("=" * 60)
+    logger.info("HSCodeFinder — Ready at http://localhost:8001")
 
     yield
 
     logger.info("HSCodeFinder — Shutting down")
 
 
-# Create FastAPI app
 app = FastAPI(
     title="HSCodeFinder",
-    description="Intelligent HS Code Classification Assistant",
+    description="HS Code Classification Assistant",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# Trusted host middleware
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS middleware
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-@app.middleware("http")
-async def add_security_headers(request, call_next):
-    """Add basic hardening headers to every response."""
-    response: Response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    return response
-
-# Register API routes
 app.include_router(router)
 
-# Mount frontend files locally (development mode)
 if SERVE_FRONTEND and FRONTEND_DIR.exists():
-    # Serve static files (CSS, JS) from frontend directory at root
     app.mount("", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
     @app.get("/", include_in_schema=False)
     async def serve_frontend_root():
-        """Serve index.html from frontend directory."""
         index_path = FRONTEND_DIR / "index.html"
         if index_path.exists():
             return FileResponse(str(index_path))
@@ -181,5 +138,4 @@ if SERVE_FRONTEND and FRONTEND_DIR.exists():
 else:
     @app.get("/", include_in_schema=False)
     async def api_root():
-        """Return API status when frontend is not served."""
         return {"message": "HSCodeFinder API is running.", "status": "ok"}
